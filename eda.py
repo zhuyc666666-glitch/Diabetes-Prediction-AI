@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-# 数据文件路径：这里按照题目要求读取 diabetes 文件夹下的 CSV 文件
-CSV_PATH = Path("diabetes") / "diabetes_prediction_dataset.csv"
+# 数据文件路径：统一读取 data 文件夹下的 diabetes_prediction_dataset.csv
+CSV_PATH = Path("data") / "diabetes_prediction_dataset.csv"
 
 # 图片输出文件夹路径：所有探索性分析图表都会保存到 figures 文件夹
 FIGURES_DIR = Path("figures")
@@ -13,7 +13,7 @@ FIGURES_DIR = Path("figures")
 
 def print_basic_info(df):
     """打印数据集的基础信息。"""
-    # 1. 查看数据前 5 行，快速了解字段和样本长什么样
+    # 1. 查看数据前 5 行，快速了解字段和样本内容
     print("1. First 5 rows:")
     print(df.head())
 
@@ -119,6 +119,7 @@ def save_relationship_plot(df, feature, output_file):
 
 
 def main():
+    """执行探索性数据分析并保存图表。"""
     # 先检查数据文件是否存在；如果不存在，给出提示并结束程序
     if not CSV_PATH.exists():
         print(f"File not found: {CSV_PATH}")
