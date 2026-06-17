@@ -25,10 +25,10 @@ from sklearn.preprocessing import OneHotEncoder
 # 数据文件路径：按照要求读取 data 文件夹下的 diabetes_prediction_dataset.csv
 DATA_PATH = Path("data") / "diabetes_prediction_dataset.csv"
 
-# 图片保存目录：用于保存最佳模型的混淆矩阵和 ROC 曲线
+# 图片保存目录：用于保存模型评估图和特征重要性图
 FIGURES_DIR = Path("figures")
 
-# 模型保存目录：用于保存最佳模型和训练时的特征列名
+# 模型保存目录：用于保存最佳模型、特征列名和特征重要性 CSV
 MODELS_DIR = Path("models")
 
 # 最佳模型保存路径
@@ -36,6 +36,12 @@ BEST_MODEL_PATH = MODELS_DIR / "best_diabetes_model.pkl"
 
 # 训练时使用的原始特征列名保存路径
 FEATURE_COLUMNS_PATH = MODELS_DIR / "feature_columns.pkl"
+
+# 特征重要性 CSV 保存路径
+FEATURE_IMPORTANCE_PATH = MODELS_DIR / "feature_importance.csv"
+
+# 特征重要性图片保存路径
+FEATURE_IMPORTANCE_FIGURE_PATH = FIGURES_DIR / "feature_importance.png"
 
 
 def load_data():
@@ -103,8 +109,8 @@ def build_preprocessor():
 def get_candidate_models():
     """定义需要训练和比较的三个候选模型。"""
     # Logistic Regression：线性分类模型，作为简单且可解释的基线模型
-    # Random Forest：基于多棵决策树的集成模型，常用于表格数据分类任务
-    # Gradient Boosting：逐步提升的集成模型，通常能捕捉更复杂的非线性关系
+    # Random Forest：基于多棵决策树的集成模型，适合做特征重要性分析
+    # Gradient Boosting：逐步提升的集成模型，也支持 feature_importances_
     return {
         "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
         "Random Forest": RandomForestClassifier(random_state=42),
@@ -166,7 +172,7 @@ def train_and_compare_models(X_train, X_test, y_train, y_test):
         metrics["Model"] = model_name
         results.append(metrics)
 
-        # 保存训练后的模型和预测结果，方便后面选择最佳模型和绘图
+        # 保存训练后的模型和预测结果，方便后面选择最佳模型、绘图和分析特征重要性
         trained_models[model_name] = model
         predictions[model_name] = {
             "y_pred": y_pred,
@@ -195,7 +201,91 @@ def train_and_compare_models(X_train, X_test, y_train, y_test):
     print(f"\nBest model selected by ROC-AUC: {best_model_name}")
     print(f"Best ROC-AUC: {best_row['ROC-AUC']:.4f}")
 
-    return best_model_name, best_model, best_prediction, results_df
+    return best_model_name, best_model, best_prediction, results_df, trained_models
+
+
+def clean_feature_name(feature_name):
+    """清理 Pipeline 输出的特征名，让图表和网页展示更易读。"""
+    # ColumnTransformer 会给特征名加上 categorical__ 或 remainder__ 前缀，这里去掉前缀
+    cleaned_name = feature_name.replace("categorical__", "").replace("remainder__", "")
+
+    # One-Hot Encoding 后的特征名一般形如 gender_Male 或 smoking_history_never
+    return cleaned_name
+
+
+def get_model_for_feature_importance(best_model_name, best_model, trained_models):
+    """选择用于特征重要性分析的树模型。"""
+    # 优先使用最佳模型；如果最佳模型是 Random Forest 或 Gradient Boosting，通常会有 feature_importances_
+    best_classifier = best_model.named_steps["classifier"]
+    if hasattr(best_classifier, "feature_importances_"):
+        return best_model_name, best_model
+
+    # 如果最佳模型是 Logistic Regression，没有 feature_importances_，则退回使用 Random Forest
+    random_forest_model = trained_models.get("Random Forest")
+    if random_forest_model is not None:
+        random_forest_classifier = random_forest_model.named_steps["classifier"]
+        if hasattr(random_forest_classifier, "feature_importances_"):
+            print(
+                "\nBest model has no feature_importances_. "
+                "Use Random Forest for feature importance analysis."
+            )
+            return "Random Forest", random_forest_model
+
+    # 如果没有任何可用树模型，则跳过特征重要性分析
+    return None, None
+
+
+def save_feature_importance(best_model_name, best_model, trained_models):
+    """提取、排序并保存树模型的 Feature Importance。"""
+    # 选择最佳树模型；如果最佳模型不是树模型，则使用 Random Forest 作为解释模型
+    importance_model_name, importance_model = get_model_for_feature_importance(
+        best_model_name,
+        best_model,
+        trained_models,
+    )
+
+    if importance_model is None:
+        print("\nNo model with feature_importances_ found. Skip feature importance.")
+        return
+
+    # 从 Pipeline 中取出预处理器和分类器
+    preprocessor = importance_model.named_steps["preprocessor"]
+    classifier = importance_model.named_steps["classifier"]
+
+    # 如果分类器没有 feature_importances_ 属性，则跳过
+    if not hasattr(classifier, "feature_importances_"):
+        print("\nSelected model has no feature_importances_. Skip feature importance.")
+        return
+
+    # 获取 One-Hot Encoding 后的特征名，确保和 feature_importances_ 一一对应
+    transformed_feature_names = preprocessor.get_feature_names_out()
+    cleaned_feature_names = [
+        clean_feature_name(feature_name) for feature_name in transformed_feature_names
+    ]
+
+    # 整理成 DataFrame，并按重要性从高到低排序
+    importance_df = pd.DataFrame(
+        {
+            "feature": cleaned_feature_names,
+            "importance": classifier.feature_importances_,
+        }
+    ).sort_values("importance", ascending=False)
+
+    # 保存完整特征重要性表格，供 Streamlit 页面读取 Top 5 Risk Factors
+    importance_df.to_csv(FEATURE_IMPORTANCE_PATH, index=False)
+    print(f"Feature importance CSV saved to: {FEATURE_IMPORTANCE_PATH}")
+
+    # 绘制 Top 15 特征重要性水平柱状图，让图表保持清晰
+    top_features = importance_df.head(15).sort_values("importance", ascending=True)
+    plt.figure(figsize=(9, 6))
+    plt.barh(top_features["feature"], top_features["importance"], color="#0e7490")
+    plt.title(f"Feature Importance ({importance_model_name})")
+    plt.xlabel("Importance")
+    plt.ylabel("Feature")
+    plt.tight_layout()
+    plt.savefig(FEATURE_IMPORTANCE_FIGURE_PATH, dpi=300)
+    plt.close()
+    print(f"Feature importance figure saved to: {FEATURE_IMPORTANCE_FIGURE_PATH}")
 
 
 def save_confusion_matrix(y_test, y_pred):
@@ -265,11 +355,13 @@ def main():
     )
 
     # 训练并比较 Logistic Regression、Random Forest、Gradient Boosting 三个模型
-    best_model_name, best_model, best_prediction, _ = train_and_compare_models(
-        X_train,
-        X_test,
-        y_train,
-        y_test,
+    best_model_name, best_model, best_prediction, _, trained_models = (
+        train_and_compare_models(
+            X_train,
+            X_test,
+            y_train,
+            y_test,
+        )
     )
 
     # 为最佳模型保存混淆矩阵和 ROC 曲线，方便后续查看模型表现
@@ -278,6 +370,9 @@ def main():
 
     # 保存最佳模型和训练时使用的特征列名
     save_artifacts(best_model, feature_columns)
+
+    # 保存树模型的 Feature Importance 图和 CSV
+    save_feature_importance(best_model_name, best_model, trained_models)
 
 
 if __name__ == "__main__":
