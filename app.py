@@ -11,6 +11,9 @@ MODEL_PATH = Path("models") / "best_diabetes_model.pkl"
 # 特征列名文件路径：用于保证网页输入数据和训练时的特征顺序一致
 FEATURE_COLUMNS_PATH = Path("models") / "feature_columns.pkl"
 
+# 特征重要性文件路径：由 train.py 中的 Feature Importance 分析生成
+FEATURE_IMPORTANCE_PATH = Path("models") / "feature_importance.csv"
+
 # 页面中会采集的原始输入字段
 RAW_INPUT_COLUMNS = [
     "gender",
@@ -111,6 +114,23 @@ def load_model_and_feature_columns():
     feature_columns = joblib.load(FEATURE_COLUMNS_PATH)
 
     return model, feature_columns
+
+
+@st.cache_data
+def load_feature_importance():
+    """读取 Feature Importance CSV，用于在网页展示 Top 5 Risk Factors。"""
+    # 如果还没有运行 train.py 生成 feature_importance.csv，则返回空表
+    if not FEATURE_IMPORTANCE_PATH.exists():
+        return pd.DataFrame(columns=["feature", "importance"])
+
+    # 读取特征重要性结果，并确保按重要性从高到低排序
+    importance_df = pd.read_csv(FEATURE_IMPORTANCE_PATH)
+    if {"feature", "importance"}.issubset(importance_df.columns):
+        importance_df = importance_df.sort_values("importance", ascending=False)
+        return importance_df
+
+    # 如果 CSV 格式不符合预期，则返回空表，避免页面报错
+    return pd.DataFrame(columns=["feature", "importance"])
 
 
 def render_header():
@@ -267,6 +287,36 @@ def render_result(probability, risk_level):
     )
 
 
+def render_top_risk_factors():
+    """在网页中展示模型认为最重要的 Top 5 Risk Factors。"""
+    # 读取由 train.py 生成的 feature_importance.csv
+    importance_df = load_feature_importance()
+
+    # 如果文件不存在或内容为空，就给出温和提示
+    if importance_df.empty:
+        st.markdown("### Top 5 Risk Factors")
+        st.info("Feature importance is not available yet. Please run train.py first.")
+        return
+
+    # 取重要性最高的前 5 个特征
+    top_factors = importance_df.head(5).copy()
+    top_factors["importance"] = top_factors["importance"].round(4)
+
+    st.markdown("### Top 5 Risk Factors")
+
+    # 用表格展示 Top 5 风险因素，保持页面简洁清晰
+    st.dataframe(
+        top_factors.rename(
+            columns={
+                "feature": "Risk Factor",
+                "importance": "Importance",
+            }
+        ),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
 def predict_probability(model, input_df):
     """使用模型预测 diabetes=1 的概率。"""
     # 优先使用 predict_proba 获取阳性类别概率
@@ -288,6 +338,9 @@ def main():
 
     # 加载模型和训练时使用的特征列
     model, feature_columns = load_model_and_feature_columns()
+
+    # 在输入表单上方展示全局 Top 5 Risk Factors
+    render_top_risk_factors()
 
     # 渲染输入表单
     submitted, input_data = render_input_form()
