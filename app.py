@@ -180,9 +180,9 @@ def render_home():
             </div>
             <div class="feature-card">
                 <div>
-                    <div class="feature-kicker">Coming Soon</div>
+                    <div class="feature-kicker">Risk Prediction</div>
                     <h3>Heart Disease Risk Prediction</h3>
-                    <p>A future module for cardiovascular risk screening with structured patient inputs and interpretable model output.</p>
+                    <p>Estimate cardiovascular disease risk using clinical features and machine learning.</p>
                 </div>
                 <div class="feature-link">Open from sidebar: 2 Heart Disease Risk</div>
             </div>
@@ -202,7 +202,8 @@ def render_home():
     st.markdown(
         """
         <div class="footer-note">
-            This platform is designed as a clean medical AI portfolio project for education and demonstration.
+            Use the Streamlit sidebar navigation to open Diabetes Risk Prediction,
+            Heart Disease Risk Prediction, and Explainable AI pages.
         </div>
         """,
         unsafe_allow_html=True,
